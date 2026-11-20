@@ -1,0 +1,75 @@
+name: Build patched MSIX
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      # Must match <Identity Publisher> in Package.appxmanifest or signing fails.
+      PUBLISHER: CN=BEC0F2AA-07EB-4762-A2FE-13550AF289A5
+      OUT_DIR: ${{ github.workspace }}\out
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Locate Windows SDK mrmsupport.dll
+        shell: pwsh
+        run: |
+          $dll = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\mrmsupport.dll" -ErrorAction SilentlyContinue |
+                 Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $dll) { throw "mrmsupport.dll not found in any installed Windows SDK" }
+          Write-Host "Using $($dll.FullName)"
+          "MRM_DLL=$($dll.FullName)" | Out-File $env:GITHUB_ENV -Append
+
+      - name: Create signing certificate
+        shell: pwsh
+        run: |
+          $cert = New-SelfSignedCertificate -Type Custom -Subject $env:PUBLISHER `
+            -KeyUsage DigitalSignature -FriendlyName "Sefirah patched build" `
+            -CertStoreLocation "Cert:\CurrentUser\My" `
+            -TextExtension @("2.5.29.37={text}1.3.6.1.5.5.7.3.3", "2.5.29.19={text}")
+          New-Item -ItemType Directory -Force $env:OUT_DIR | Out-Null
+          Export-Certificate -Cert $cert -FilePath "$env:OUT_DIR\SefirahPatched.cer" | Out-Null
+          "CERT_THUMB=$($cert.Thumbprint)" | Out-File $env:GITHUB_ENV -Append
+
+      - name: Build and package
+        shell: pwsh
+        run: |
+          dotnet publish src/Sefirah/Sefirah.csproj `
+            -c Release -f net10.0-windows10.0.26100 -r win-x64 `
+            -p:Platform=x64 `
+            -p:SefirahMrmSupportDll="$env:MRM_DLL" `
+            -p:GenerateAppxPackageOnBuild=true `
+            -p:UapAppxPackageBuildMode=SideloadOnly `
+            -p:AppxBundle=Never `
+            -p:AppxPackageSigningEnabled=true `
+            -p:PackageCertificateThumbprint=$env:CERT_THUMB `
+            -p:AppxPackageDir="$env:OUT_DIR\pkg\"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Show package identity
+        shell: pwsh
+        run: |
+          Get-ChildItem -Recurse $env:OUT_DIR -Include *.msix | ForEach-Object { Write-Host $_.FullName }
+          $msix = Get-ChildItem -Recurse $env:OUT_DIR -Include *.msix | Select-Object -First 1
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [IO.Compression.ZipFile]::OpenRead($msix.FullName)
+          $entry = $zip.Entries | Where-Object FullName -eq 'AppxManifest.xml'
+          $reader = New-Object IO.StreamReader($entry.Open())
+          ([xml]$reader.ReadToEnd()).Package.Identity | Format-List
+          $reader.Close(); $zip.Dispose()
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Sefirah-patched-x64
+          path: |
+            out/SefirahPatched.cer
+            out/pkg/**/*.msix
+            out/pkg/**/Dependencies/x64/*

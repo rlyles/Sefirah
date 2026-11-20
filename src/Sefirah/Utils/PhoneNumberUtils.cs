@@ -9,7 +9,38 @@ public static partial class PhoneNumberUtils
     private static readonly PhoneNumberUtil phoneNumberUtil = PhoneNumberUtil.GetInstance();
     private static readonly Regex NonPhoneCharactersRegex = PhoneNumberRegex();
 
-    private static readonly string currentRegionInfo = RegionInfo.CurrentRegion.TwoLetterISORegionName;
+    // Default region for numbers stored without a country code (e.g. "(864) 555-1234").
+    // RegionInfo.CurrentRegion follows the Windows "Country or region" setting, which can be
+    // unset or something libphonenumber doesn't accept; fall back to the culture's region.
+    // "ZZ" (unknown) still parses numbers that carry a +country code.
+    private static readonly string currentRegionInfo = ResolveDefaultRegion();
+
+    private static string ResolveDefaultRegion()
+    {
+        var supported = phoneNumberUtil.GetSupportedRegions();
+        Func<string>[] candidates =
+        [
+            () => RegionInfo.CurrentRegion.TwoLetterISORegionName,
+            () => new RegionInfo(CultureInfo.CurrentCulture.Name).TwoLetterISORegionName,
+            () => new RegionInfo(CultureInfo.InstalledUICulture.Name).TwoLetterISORegionName,
+        ];
+
+        foreach (var candidate in candidates)
+        {
+            try
+            {
+                var region = candidate()?.ToUpperInvariant();
+                if (region is not null && supported.Contains(region))
+                    return region;
+            }
+            catch (ArgumentException)
+            {
+                // Neutral or invariant culture with no region; try the next source.
+            }
+        }
+
+        return "ZZ";
+    }
 
     public static bool IsSemanticMatch(string? left, string? right)
     {
@@ -19,18 +50,26 @@ public static partial class PhoneNumberUtils
         }
 
         var leftParsed = TryParse(left);
-        if (leftParsed is null)
-        {
-            return false;
-        }
-
         var rightParsed = TryParse(right);
-        if (rightParsed is null)
+
+        PhoneNumberUtil.MatchType matchType;
+        if (leftParsed is not null && rightParsed is not null)
         {
-            return false;
+            matchType = phoneNumberUtil.IsNumberMatch(leftParsed, rightParsed);
+        }
+        else
+        {
+            // At least one side couldn't be parsed with the default region (typically a contact
+            // saved without +1 when the PC's region isn't usable). The string overload borrows the
+            // country code from whichever number has one, so "+18645551234" matches "(864) 555-1234".
+            if (!IsPhoneNumber(left) || !IsPhoneNumber(right))
+            {
+                return false;
+            }
+
+            matchType = phoneNumberUtil.IsNumberMatch(left.Trim(), right.Trim());
         }
 
-        var matchType = phoneNumberUtil.IsNumberMatch(leftParsed, rightParsed);
         return matchType is PhoneNumberUtil.MatchType.EXACT_MATCH or PhoneNumberUtil.MatchType.NSN_MATCH;
     }
 
