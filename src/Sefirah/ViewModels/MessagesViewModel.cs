@@ -72,7 +72,9 @@ public sealed partial class MessagesViewModel : BaseViewModel
     private static long nextTempId;
 
     public bool ShouldShowEmptyState => !IsNewConversation && SelectedConversation is null;
-    public bool ShouldShowComposeUI => IsNewConversation || SelectedConversation is not null;
+    // RCS group threads can't be sent to over SMS/MMS: the phone would treat the
+    // "...@rcs.google.com" placeholder as a phone number and text a random number.
+    public bool ShouldShowComposeUI => IsNewConversation || SelectedConversation is { IsRcsGroup: false };
 
     partial void OnIsNewConversationChanged(bool value)
     {
@@ -313,6 +315,8 @@ public sealed partial class MessagesViewModel : BaseViewModel
             }
 
             var recipients = recipientContacts.Select(c => c.Address).ToList();
+            if (recipients.Any(PhoneNumberUtils.IsRcsGroupPlaceholder))
+                return;
             var timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             var uniqueId = NextTempId();
             var body = (messageText ?? string.Empty).Trim();

@@ -303,6 +303,14 @@ public class SmsFeature(
 
     public void QueueSendingMessage(PairedDevice device, Message uiMessage, IReadOnlyList<string> addresses)
     {
+        // Never hand an RCS group placeholder to the phone's SMS/MMS sender: it gets
+        // mangled into a phone number and the message goes to a stranger.
+        if (addresses.Any(PhoneNumberUtils.IsRcsGroupPlaceholder))
+        {
+            logger.Warn($"Refusing to send to RCS group thread {uiMessage.ThreadId}: no SMS/MMS address");
+            return;
+        }
+
         lock (queuedLock)
             queuedMessages.Add(new QueuedMessage(device.Id, uiMessage, addresses));
 
