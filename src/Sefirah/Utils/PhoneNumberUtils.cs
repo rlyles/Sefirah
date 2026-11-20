@@ -98,6 +98,13 @@ public static partial class PhoneNumberUtils
         }
     }
 
+    /// <summary>
+    /// Google Messages files RCS group threads under a single placeholder recipient
+    /// ("&lt;id&gt;@rcs.google.com"); the real participants only appear on each message.
+    /// </summary>
+    public static bool IsRcsGroupPlaceholder(string? value) =>
+        value is not null && value.Trim().EndsWith("@rcs.google.com", StringComparison.OrdinalIgnoreCase);
+
     public static bool IsPhoneNumber(string? value) =>
         !string.IsNullOrWhiteSpace(value) && LooksLikePhoneNumber(value.Trim());
 

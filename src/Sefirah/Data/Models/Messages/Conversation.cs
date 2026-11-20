@@ -12,14 +12,22 @@ public partial class Conversation : ObservableObject
 
     public List<Contact> Contacts { get; set; } = [];
 
+    // RCS group threads: Contacts holds only the "...@rcs.google.com" placeholder (kept for sending);
+    // Participants holds the people seen on its messages, for display.
+    public List<Contact> Participants { get; set; } = [];
+
+    public bool IsRcsGroup => Contacts.Count > 0 && Contacts.All(c => PhoneNumberUtils.IsRcsGroupPlaceholder(c.Address));
+
     // Group presentation follows the conversation's resolved participants.
-    public bool IsGroup => Contacts.Count > 1;
+    public bool IsGroup => Contacts.Count > 1 || IsRcsGroup;
 
-    public Contact? PrimaryContact => Contacts.Count == 1 ? Contacts[0] : null;
+    public Contact? PrimaryContact => Contacts.Count == 1 && !IsRcsGroup ? Contacts[0] : null;
 
-    public string DisplayName => Contacts.Count != 0
-        ? string.Join(", ", Contacts.Select(c => c.DisplayName))
-        : "Unknown";
+    public string DisplayName => Contacts.Count == 0
+        ? "Unknown"
+        : IsRcsGroup
+            ? Participants.Count > 0 ? string.Join(", ", Participants.Select(c => c.DisplayName)) : "Group chat"
+            : string.Join(", ", Contacts.Select(c => c.DisplayName));
 
     public string SubtitleAddress => PrimaryContact?.Address ?? string.Empty;
 
@@ -74,6 +82,7 @@ public partial class Conversation : ObservableObject
         HasRead = other.HasRead;
         Checksum = other.Checksum;
         Contacts = other.Contacts;
+        Participants = other.Participants;
         if (other.MessageIndex is not null)
             MessageIndex = other.MessageIndex.Clone();
         OnPropertyChanged(nameof(DisplayName));

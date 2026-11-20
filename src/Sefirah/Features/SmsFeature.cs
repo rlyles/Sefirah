@@ -92,6 +92,7 @@ public class SmsFeature(
             var entity = await GetOrCreateConversation(deviceId, info.ThreadId);
             if (info.Recipients.Count > 0)
                 entity.AddressesJson = JsonSerializer.Serialize(info.Recipients);
+            entity.MergeRcsParticipants([info.Message]);
 
             entity.Checksum = info.Checksum;
             var saved = await UpsertMessages(deviceId, info.ThreadId, [info.Message]);
@@ -136,9 +137,15 @@ public class SmsFeature(
             if (list.Checksum is long checksum)
                 entity.Checksum = checksum;
 
+            var rosterChanged = entity.MergeRcsParticipants(textMessages);
+
             if (list.Kind is not MessageListKind.History || entity.LastMessageTimestamp == 0)
             {
                 await UpdateConversationPreview(entity, deviceId, list.ThreadId, textMessages);
+                await smsRepository.SaveConversationAsync(entity);
+            }
+            else if (rosterChanged)
+            {
                 await smsRepository.SaveConversationAsync(entity);
             }
 
